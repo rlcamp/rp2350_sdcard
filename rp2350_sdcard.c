@@ -41,6 +41,10 @@ static uint8_t spi_receive_one_byte_with_rx_enabled(void) {
 }
 
 static uint8_t r1_response(void) {
+    /* discard first byte of response? */
+    /* NOTE: this is necessary on some boards and some cards if miso is not pulled up */
+//    spi_receive_one_byte_with_rx_enabled();
+
     uint8_t result, attempts = 0;
     /* sd and mmc agree on max 8 attempts, mmc requires at least two attempts */
     while (0xFF == (result = spi_receive_one_byte_with_rx_enabled()) && attempts++ < 8);
@@ -197,6 +201,7 @@ int spi_sd_init(unsigned baud_rate_reduction) {
     gpio_set_function(10, GPIO_FUNC_SPI);
     gpio_set_function(11, GPIO_FUNC_SPI);
     gpio_set_function(12, GPIO_FUNC_SPI);
+    gpio_pull_up(12);
 
     gpio_init(15);
     gpio_set_dir(15, GPIO_OUT);
