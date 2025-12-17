@@ -196,6 +196,13 @@ static void spi_disable(void) {
     clocks_hw->sleep_en1 &= ~(CLOCKS_SLEEP_EN1_CLK_SYS_SPI1_BITS | CLOCKS_SLEEP_EN1_CLK_PERI_SPI1_BITS);
 }
 
+void spi_sd_shutdown(void) {
+    gpio_disable_pulls(12);
+
+    /* make sure the CS pin doesn't continue to back power the card */
+    gpio_deinit(15);
+}
+
 int spi_sd_init(unsigned baud_rate_reduction) {
     spi_enable(400000);
     gpio_set_function(10, GPIO_FUNC_SPI);
