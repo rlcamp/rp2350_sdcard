@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "version.h"
+
 extern void yield(void);
 
 volatile unsigned char verbose = 0;
