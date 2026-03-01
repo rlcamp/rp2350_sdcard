@@ -89,11 +89,15 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
     hw_set_bits(&timer_hw->inte, 1U << alarm_num);
     irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
 
-    /* arm timer */
-    timer_hw->alarm[alarm_num] = timer_hw->timerawl + delay_ms * 1000;
+    const uint32_t delay_us = delay_ms * 1000, timerawl_prior = timer_hw->timerawl;
 
-    /* run other tasks or low power sleep until alarm interrupt */
-    while (!(timer_hw->intr & (1U << alarm_num)))
+    /* arm timer */
+    timer_hw->alarm[alarm_num] = timerawl_prior + delay_us;
+
+    /* while the delay has not elapsed, regardless of whether this interrupt fired, run
+     other tasks and low power sleep. this correctly handles the case where the requested
+     wakeup time occurred prior to arming the timer, so that we don't wait 72 more mins */
+    while (timer_hw->timerawl - timerawl_prior < delay_us)
         yield();
 
     /* acknowledge and clear the interrupt in both timer and nvic */
