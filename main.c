@@ -84,12 +84,22 @@ void run_from_xosc(void) {
 }
 
 void lower_power_sleep_ms(const unsigned delay_ms) {
-    /* get a timer, enable interrupt for alarm, but leave it disabled in nvic */
-    const unsigned alarm_num = timer_hardware_alarm_claim_unused(timer_hw, true);
+    const unsigned delay_us = delay_ms * 1000;
+
+    const uint32_t timerawl_prior = timer_hw->timerawl;
+
+    /* get an alarm, waiting for another task to release one if necessary */
+    int alarm_num;
+    while ((alarm_num = timer_hardware_alarm_claim_unused(timer_hw, false)) == -1 &&
+           timer_hw->timerawl - timerawl_prior < delay_us)
+        yield();
+
+    /* if the requested delay elapsed while waiting for a timer, then we're done */
+    if (-1 == alarm_num) return;
+
+    /* enable interrupt for alarm, but leave it disabled in nvic */
     hw_set_bits(&timer_hw->inte, 1U << alarm_num);
     irq_set_enabled(hardware_alarm_get_irq_num(alarm_num), false);
-
-    const uint32_t delay_us = delay_ms * 1000, timerawl_prior = timer_hw->timerawl;
 
     /* arm timer */
     timer_hw->alarm[alarm_num] = timerawl_prior + delay_us;
@@ -106,7 +116,10 @@ void lower_power_sleep_ms(const unsigned delay_ms) {
 
     /* cleanup */
     hw_clear_bits(&timer_hw->inte, 1U << alarm_num);
+
+    /* unclaim the alarm and let another thread claim it if necessary */
     timer_hardware_alarm_unclaim(timer_hw, alarm_num);
+    __sev();
 }
 
 /* allow an enable line to be shared between peripherals */
