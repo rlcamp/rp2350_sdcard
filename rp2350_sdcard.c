@@ -191,6 +191,8 @@ static void spi_enable(unsigned baud) {
 }
 
 static void spi_disable(void) {
+    /* clear miso AFTER releasing CS to keep some cards from drawing a lot of power */
+    spi_write_blocking(spi1, &(uint8_t){ 0xFF }, 1);
     spi_deinit(spi1);
     clocks_hw->wake_en1 &= ~(CLOCKS_WAKE_EN1_CLK_SYS_SPI1_BITS | CLOCKS_WAKE_EN1_CLK_PERI_SPI1_BITS);
     clocks_hw->sleep_en1 &= ~(CLOCKS_SLEEP_EN1_CLK_SYS_SPI1_BITS | CLOCKS_SLEEP_EN1_CLK_PERI_SPI1_BITS);
