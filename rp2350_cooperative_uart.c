@@ -6,6 +6,13 @@
 #include "hardware/sync.h"
 #include "RP2350.h"
 
+/* use the same macro name that pico stdio would use */
+#ifndef PICO_DEFAULT_UART_BAUD_RATE
+#define PICO_DEFAULT_UART_BAUD_RATE 115200
+#endif
+
+unsigned cooperative_uart_current_baudrate = PICO_DEFAULT_UART_BAUD_RATE;
+
 __attribute((weak)) void yield(void) { }
 __attribute((weak)) void * current_task(void) { return NULL; }
 
@@ -14,37 +21,30 @@ __attribute((weak)) void * current_task(void) { return NULL; }
  calls to uart0_next_byte() from the main thread */
 static unsigned char rx_ring[128];
 static size_t rx_ring_filled = 0, rx_ring_drained = 0;
-static size_t uart0_rx_overruns = 0;
 
 static unsigned char tx_ring[128];
 static size_t tx_ring_filled = 0, tx_ring_drained = 0;
 
-static void uart0_handler(void) {
-
+void UART0_IRQ_Handler(void) {
     /* if we can move bytes into the tx fifo, move as many as we can */
-    while (!(uart_get_hw(uart0)->fr & UART_UARTFR_TXFF_BITS) && tx_ring_filled != tx_ring_drained)
-        uart_get_hw(uart0)->dr = tx_ring[tx_ring_drained++ % sizeof(tx_ring)];
+    while (!(uart0_hw->fr & UART_UARTFR_TXFF_BITS) && tx_ring_filled != tx_ring_drained)
+        uart0_hw->dr = tx_ring[tx_ring_drained++ % sizeof(tx_ring)];
 
     /* unconditionally clear the fifo-became-empty condition */
-    uart_get_hw(uart0)->icr = 1U << UART_UARTICR_TXIC_LSB;
+    uart0_hw->icr = 1U << UART_UARTICR_TXIC_LSB;
 
     /* we might have also gotten here because there are bytes in the rx fifo */
-    while (!(uart_get_hw(uart0)->fr & UART_UARTFR_RXFE_BITS)) {
+    while (!(uart0_hw->fr & UART_UARTFR_RXFE_BITS)) {
         /* consume the byte from the uart peripheral */
-        const unsigned char byte = uart_get_hw(uart0)->dr;
+        const unsigned char byte = uart0_hw->dr;
 
-        /* if ring buffer is full, repeatedly overwrite the newest byte, otherwise advance cursor */
-        if (rx_ring_filled - rx_ring_drained >= sizeof(rx_ring)) {
-            rx_ring_filled--;
-            uart0_rx_overruns++;
-        }
         rx_ring[rx_ring_filled++ % sizeof(rx_ring)] = byte;
     }
 }
 
 void uart_write_with_yield(const void * bytes, const size_t count) {
     const unsigned char * cursor = bytes, * stop = cursor + count;
-    hw_set_bits(&uart_get_hw(uart0)->imsc, 1U << UART_UARTIMSC_TXIM_LSB);
+    hw_set_bits(&uart0_hw->imsc, 1U << UART_UARTIMSC_TXIM_LSB);
     while (cursor != stop) {
         __DSB();
         const size_t slots_available = sizeof(tx_ring) - (tx_ring_filled - *(volatile size_t *)&tx_ring_drained);
@@ -68,7 +68,7 @@ void uart_write_with_yield(const void * bytes, const size_t count) {
 
 void uart_tx_wait_blocking_with_yield(void) {
     /* block in busy yield until all bytes in the tx fifo have been transmitted */
-    while (uart_get_hw(uart0)->fr & UART_UARTFR_BUSY_BITS) {
+    while (uart0_hw->fr & UART_UARTFR_BUSY_BITS) {
         /* since we are not waiting for an interrupt-accompanied condition, we must
          inhibit the wfe call within yield, but can still allow yield to do other things */
         __sev();
@@ -126,18 +126,27 @@ const char * get_line_from_uart(void) {
 
     __DSB();
     /* if any new bytes from uart, and not already a complete line... */
-    for (size_t bytes = rx_ring_filled - rx_ring_drained; bytes; bytes--) {
+    for (size_t filled_now; rx_ring_drained != (filled_now = *(volatile size_t *)&rx_ring_filled);) {
+        /* if reader fell behind, fast forward over the missed bytes and set lockout */
+        if (filled_now - rx_ring_drained > sizeof(rx_ring)) {
+            rx_ring_drained = filled_now - sizeof(rx_ring);
+            ilinebuf = sizeof(linebuf);
+            continue;
+        }
+
         /* consume a byte from the upstream ring buffer filled by the interrupt handler */
         const unsigned char byte = rx_ring[rx_ring_drained++ % sizeof(rx_ring)];
 
-        /* only advance the cursor if not already full */
-        if (ilinebuf < sizeof(linebuf)) linebuf[ilinebuf++] = byte;
+        /* if we are in lockout, we ignore this byte, and may drop out of lockout */
+        if (ilinebuf == sizeof(linebuf)) {
+            if ('\r' == byte || '\n' == byte) ilinebuf = 0;
+            continue;
+        }
+
+        linebuf[ilinebuf++] = byte;
 
         /* we treat either line ending identically, and ignore duplicates/empty lines */
         if ('\r' == byte || '\n' == byte) {
-            /* if overflow occurred, discard the partial line */
-            if (byte != linebuf[ilinebuf - 1]) ilinebuf = 1;
-
             /* overwrite whichever line ending we got with a zero termination */
             linebuf[ilinebuf - 1] = '\0';
 
@@ -157,11 +166,10 @@ void cooperative_uart_init(void) {
     gpio_set_function(1, UART_FUNCSEL_NUM(uart0, 1));
     gpio_pull_up(1);
 
-    uart_init(uart0, 115200);
-    irq_set_exclusive_handler(UART_IRQ_NUM(uart0), uart0_handler);
+    uart_init(uart0, cooperative_uart_current_baudrate);
     irq_set_enabled(UART_IRQ_NUM(uart0), true);
 
     /* wake up when either fifo reaches 1/8 full, or when fifo is nonempty and a timeout elapses */
-    hw_set_bits(&uart_get_hw(uart0)->imsc, 1U << UART_UARTIMSC_RXIM_LSB | 1U << UART_UARTIMSC_RTIM_LSB);
-    hw_write_masked(&uart_get_hw(uart0)->ifls, 0 << UART_UARTIFLS_RXIFLSEL_LSB, 0);
+    hw_set_bits(&uart0_hw->imsc, 1U << UART_UARTIMSC_RXIM_LSB | 1U << UART_UARTIMSC_RTIM_LSB);
+    hw_write_masked(&uart0_hw->ifls, 0 << UART_UARTIFLS_RXIFLSEL_LSB, 0);
 }

@@ -1,5 +1,7 @@
 #include <stddef.h>
 
+extern unsigned cooperative_uart_current_baudrate;
+
 void uart_write_with_yield(const void * bytes, const size_t count);
 
 void uart_tx_wait_blocking_with_yield(void);
