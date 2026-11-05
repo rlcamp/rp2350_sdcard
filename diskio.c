@@ -20,6 +20,7 @@ DSTATUS disk_status(BYTE pdrv) {
     return diskio_initted ? 0 : STA_NOINIT;
 }
 
+unsigned char disable_block_cache = 0;
 static LBA_t block_cache_sectors[64];
 static unsigned char block_cache[64][512];
 static const size_t B = sizeof(block_cache) / sizeof(block_cache[0]);
@@ -37,7 +38,8 @@ DSTATUS disk_initialize(BYTE pdrv) {
         spi_sd_restore_baud_rate();
     }
 
-    __builtin_memset(block_cache_sectors, 0, sizeof(block_cache_sectors));
+    if (!disable_block_cache)
+        __builtin_memset(block_cache_sectors, 0, sizeof(block_cache_sectors));
 
     diskio_initted = 1;
     return 0;
@@ -68,6 +70,8 @@ static DRESULT flush_deferred_zeros(void) {
 }
 
 static void store_in_block_cache(const BYTE * buff, LBA_t sector) {
+    if (disable_block_cache) return;
+
     for (size_t icache_search = 0; icache_search < B; icache_search++)
         if (sector && block_cache_sectors[icache_search] == sector) {
             icache = icache_search;
@@ -80,7 +84,7 @@ static void store_in_block_cache(const BYTE * buff, LBA_t sector) {
 }
 
 static int load_from_block_cache(BYTE * buff, LBA_t sector, UINT count) {
-    if (count != 1 || !sector) return -1;
+    if (disable_block_cache || count != 1 || !sector) return -1;
 
     for (size_t icache_search = 0; icache_search < B; icache_search++)
         if (block_cache_sectors[icache_search] == sector) {
