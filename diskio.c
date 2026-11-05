@@ -175,7 +175,7 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void * buff) {
         return 0;
     }
     else if (GET_BLOCK_SIZE == cmd)
-        *(LBA_t *)buff = 1; /* TODO: populate this from actual */
+        *(DWORD *)buff = 1;
     else if (GET_SECTOR_COUNT == cmd)
         *(LBA_t *)buff = INT_MAX; /* TODO: populate this from actual */
     else return RES_PARERR;
