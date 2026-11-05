@@ -7,9 +7,6 @@
 /* block device implementation code being wrapped by this */
 #include "rp2350_sdcard.h"
 
-/* needed for INT_MAX, this will go away */
-#include <limits.h>
-
 #include <stdio.h>
 
 size_t fatfs_sectors_read = 0, fatfs_sectors_written = 0;
@@ -176,8 +173,10 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void * buff) {
     }
     else if (GET_BLOCK_SIZE == cmd)
         *(DWORD *)buff = 1;
+    else if (GET_SECTOR_SIZE == cmd)
+        *(WORD *)buff = 512;
     else if (GET_SECTOR_COUNT == cmd)
-        *(LBA_t *)buff = INT_MAX; /* TODO: populate this from actual */
+        *(LBA_t *)buff = get_card_sector_count();
     else return RES_PARERR;
     return 0;
 }

@@ -205,6 +205,13 @@ void spi_sd_shutdown(void) {
     gpio_deinit(15);
 }
 
+static unsigned char csd[16];
+
+unsigned long long get_card_sector_count(void) {
+    /* TODO: this is only valid for SD v2, validate that assumption or remove it */
+    return (((unsigned)(csd[7] & 0x3F) << 16U) + ((unsigned)csd[8] << 8U) + csd[9] + 1U) * 1024ULL;
+}
+
 int spi_sd_init(unsigned baud_rate_reduction) {
     spi_enable(400000);
     gpio_set_function(10, GPIO_FUNC_SPI);
@@ -311,6 +318,36 @@ int spi_sd_init(unsigned baud_rate_reduction) {
 
     if (verbose >= 2)
         dprintf(2, "%s: cmd55+acmd41 success\r\n", __func__);
+
+    /* send cmd9 and read csd */
+    cs_low();
+    {
+        wait_for_card_ready();
+        if (command_and_r1_response(9, 0) > 1) {
+            cs_high();
+            spi_disable();
+            return -1;
+        }
+
+        uint8_t result;
+        while (0xFF == (result = spi_receive_one_byte_with_rx_enabled()));
+        if (0xFE != result) {
+            cs_high();
+            spi_disable();
+            dprintf(2, "%s(%d): cmd9 failed\r\n", __func__, __LINE__);
+            return -1;
+        }
+
+        spi_read_blocking(spi1, 0xFF, csd, 16);
+
+        uint8_t crc_bytes[2];
+        spi_read_blocking(spi1, 0xFF, crc_bytes, 2);
+        /* TODO: validate crc */
+    }
+    cs_high();
+
+    if (verbose >= 1)
+        dprintf(2, "%s: card size: %lu MB\r\n", __func__, (unsigned long)(get_card_sector_count() / 2048ULL));
 
     spi_deinit(spi1);
     requested_baud_rate = clock_get_hz(clk_peri) / (2U + baud_rate_reduction);
