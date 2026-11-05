@@ -22,8 +22,8 @@ DSTATUS disk_status(BYTE pdrv) {
 
 unsigned char disable_block_cache = 0;
 static LBA_t block_cache_sectors[64];
-static unsigned char block_cache[64][512];
-static const size_t B = sizeof(block_cache) / sizeof(block_cache[0]);
+static unsigned char block_cache[64 * 512];
+static const size_t B = sizeof(block_cache) / 512;
 static size_t icache = 0;
 
 DSTATUS disk_initialize(BYTE pdrv) {
@@ -78,7 +78,7 @@ static void store_in_block_cache(const BYTE * buff, LBA_t sector) {
             break;
         }
 
-    __builtin_memcpy(block_cache[icache], buff, 512);
+    __builtin_memcpy(block_cache + 512 * icache, buff, 512);
     block_cache_sectors[icache] = sector;
     icache = (icache + 1) % B;
 }
@@ -90,7 +90,7 @@ static int load_from_block_cache(BYTE * buff, LBA_t sector, UINT count) {
         if (block_cache_sectors[icache_search] == sector) {
             if (verbose >= 2)
                 dprintf(2, "%s(%d): reusing cached block %u at %u\r\n", __func__, __LINE__, (unsigned)sector, icache_search);
-            __builtin_memcpy(buff, block_cache[icache_search], 512);
+            __builtin_memcpy(buff, block_cache + 512 * icache_search, 512);
             return 0;
         }
 
