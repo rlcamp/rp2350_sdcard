@@ -20,11 +20,22 @@ DSTATUS disk_status(BYTE pdrv) {
     return diskio_initted ? 0 : STA_NOINIT;
 }
 
-unsigned char disable_block_cache = 0;
+static unsigned char disable_block_cache = 0;
 static LBA_t block_cache_sectors[64];
 static unsigned char block_cache[64 * 512];
 static const size_t B = sizeof(block_cache) / 512;
 static size_t icache = 0;
+
+/* if something else really needs the block cache */
+void * acquire_block_cache(size_t * size_p) {
+    disable_block_cache = 1;
+    *size_p = sizeof(block_cache);
+    return block_cache;
+}
+
+void release_block_cache(void) {
+    disable_block_cache = 0;
+}
 
 DSTATUS disk_initialize(BYTE pdrv) {
     (void)pdrv;
